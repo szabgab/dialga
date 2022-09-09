@@ -12,5 +12,14 @@ ahash = "0.8.0"
 palkia = { version = "0.5.2", path = "../palkia", features = ["serde"] }
 serde = { version = "1.0.144", features = ["derive"] }
 smol_str = "0.1.23"
+knuffel = "2.0.0"
+thiserror = "1.0.34"
+
+[patch.crates-io]
+# auughh
+knuffel = { git = "https://github.com/spikespaz/knuffel" }
+
+[dev-dependencies]
+miette = { version = "4.3.0", features = ["fancy"] }
 
 [workspace]

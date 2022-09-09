@@ -1,15 +1,8 @@
 use crate::{DeError, KdlAnnotatedLiteral, KdlLiteral};
 
-use std::{
-    char::CharTryFromError,
-    convert::{Infallible, TryInto},
-    num::{ParseFloatError, ParseIntError, TryFromIntError},
-};
+use std::convert::TryInto;
 
-use serde::{
-    de::{self, Error, IntoDeserializer, Unexpected, Visitor},
-    Deserializer,
-};
+use serde::de::{self, Error, IntoDeserializer, Unexpected, Visitor};
 
 macro_rules! passthru_to_literal {
     (@ $ty:ident) => {
@@ -156,7 +149,7 @@ impl<'de> de::Deserializer<'de> for KdlAnnotatedLiteralDeser<'de> {
     {
         match &self.literal {
             KdlLiteral::Null => visitor.visit_none(),
-            other => visitor.visit_some(self),
+            _ => visitor.visit_some(self),
         }
     }
 
@@ -164,8 +157,8 @@ impl<'de> de::Deserializer<'de> for KdlAnnotatedLiteralDeser<'de> {
     // Non-unit enums are parsed with the annotation as the variant.
     fn deserialize_enum<V>(
         self,
-        name: &'static str,
-        variants: &'static [&'static str],
+        _name: &'static str,
+        _variants: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -185,7 +178,7 @@ impl<'de> de::Deserializer<'de> for KdlAnnotatedLiteralDeser<'de> {
     // other passthrus that i can't do with the easy macro
     fn deserialize_unit_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -195,7 +188,7 @@ impl<'de> de::Deserializer<'de> for KdlAnnotatedLiteralDeser<'de> {
     }
     fn deserialize_newtype_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -203,7 +196,7 @@ impl<'de> de::Deserializer<'de> for KdlAnnotatedLiteralDeser<'de> {
     {
         visitor.visit_newtype_struct(self)
     }
-    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
@@ -211,8 +204,8 @@ impl<'de> de::Deserializer<'de> for KdlAnnotatedLiteralDeser<'de> {
     }
     fn deserialize_tuple_struct<V>(
         self,
-        name: &'static str,
-        len: usize,
+        _name: &'static str,
+        _len: usize,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -222,8 +215,8 @@ impl<'de> de::Deserializer<'de> for KdlAnnotatedLiteralDeser<'de> {
     }
     fn deserialize_struct<V>(
         self,
-        name: &'static str,
-        fields: &'static [&'static str],
+        _name: &'static str,
+        _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -349,7 +342,7 @@ impl<'de> de::Deserializer<'de> for KdlLiteralDeser<'de> {
     }
     fn deserialize_unit_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -361,7 +354,7 @@ impl<'de> de::Deserializer<'de> for KdlLiteralDeser<'de> {
     // Passthru to whatever
     fn deserialize_newtype_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -383,9 +376,9 @@ impl<'de> de::Deserializer<'de> for KdlLiteralDeser<'de> {
     // This should never be called
     fn deserialize_enum<V>(
         self,
-        name: &'static str,
-        variants: &'static [&'static str],
-        visitor: V,
+        _name: &'static str,
+        _variants: &'static [&'static str],
+        _visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
@@ -401,7 +394,7 @@ impl<'de> de::Deserializer<'de> for KdlLiteralDeser<'de> {
     {
         Err(DeError::invalid_type(self.0.unexpected(), &visitor))
     }
-    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
@@ -409,8 +402,8 @@ impl<'de> de::Deserializer<'de> for KdlLiteralDeser<'de> {
     }
     fn deserialize_tuple_struct<V>(
         self,
-        name: &'static str,
-        len: usize,
+        _name: &'static str,
+        _len: usize,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -429,8 +422,8 @@ impl<'de> de::Deserializer<'de> for KdlLiteralDeser<'de> {
     }
     fn deserialize_struct<V>(
         self,
-        name: &'static str,
-        fields: &'static [&'static str],
+        _name: &'static str,
+        _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -495,7 +488,7 @@ impl<'de> de::VariantAccess<'de> for EnumLiteralDeserializer<'de> {
     }
 
     // This is never valid for literals
-    fn tuple_variant<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    fn tuple_variant<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: Visitor<'de>,
     {
@@ -506,7 +499,7 @@ impl<'de> de::VariantAccess<'de> for EnumLiteralDeserializer<'de> {
     }
     fn struct_variant<V>(
         self,
-        fields: &'static [&'static str],
+        _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where

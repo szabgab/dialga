@@ -1,41 +1,62 @@
 use ahash::AHashMap;
+use heck::ToSnekCase;
 use serde::de::{self, Error, IntoDeserializer, Unexpected};
 use smol_str::SmolStr;
 
-use crate::{literal::KdlAnnotatedLiteralDeser, DeError, KdlAnnotatedLiteral, KdlLiteral, KdlNode};
+use crate::{literal::KdlAnnotatedLiteralDeser, DeError, KdlAnnotatedLiteral, KdlNode};
 
+/// Deserializer for a node
 #[derive(Debug, Clone)]
-pub(crate) struct KdlNodeDeser<'de> {
+pub struct KdlNodeDeser<'de> {
+    #[allow(dead_code)]
     name: &'de str,
     arguments: &'de [KdlAnnotatedLiteral],
     properties: &'de AHashMap<SmolStr, KdlAnnotatedLiteral>,
     children: Option<&'de [KdlNode]>,
+
+    forwarding_to_map_from_struct: bool,
 }
 
 impl<'de> KdlNodeDeser<'de> {
-    pub(crate) fn new(wrapped: &'de KdlNode) -> Self {
+    pub fn new(wrapped: &'de KdlNode) -> Self {
         Self {
             name: wrapped.name.as_str(),
             arguments: &wrapped.arguments,
             properties: &wrapped.properties,
             children: wrapped.children.as_ref().map(|kids| kids.as_slice()),
+            forwarding_to_map_from_struct: false,
         }
     }
 }
 
-macro_rules! type_error {
+macro_rules! single_scalar {
     (@ $ty:ident) => {
         paste::paste! {
             fn [< deserialize_ $ty >]<V>(self, visitor: V) -> Result<V::Value, Self::Error>
             where
-                V: de::Visitor<'de> {
-                Err(DeError::invalid_type(Unexpected::Other("a node"), &visitor))
+                V: de::Visitor<'de>,
+            {
+                match (
+                    self.arguments,
+                    self.properties.is_empty(),
+                    self.children.is_none(),
+                ) {
+                    ([it], true, true) => KdlAnnotatedLiteralDeser::new(it).[< deserialize_ $ty >](visitor),
+                    _ => Err(DeError::invalid_type(
+                        Unexpected::Other(concat!(
+                            "node that isn't exactly one argument deserializable as ",
+                            stringify!($ty),
+                            " and nothing else",
+                        )),
+                        &visitor,
+                    )),
+                }
             }
         }
     };
     ( $($ty:ident)* ) => {
         $(
-            type_error!(@ $ty);
+            single_scalar!(@ $ty);
         )*
     };
 }
@@ -43,9 +64,35 @@ macro_rules! type_error {
 impl<'de> de::Deserializer<'de> for KdlNodeDeser<'de> {
     type Error = DeError;
 
-    type_error! {
+    single_scalar! {
         u8 u16 u32 u64 i8 i16 i32 i64 char bool f32 f64
-        str string bytes byte_buf option identifier
+        str string bytes byte_buf identifier
+    }
+
+    fn deserialize_enum<V>(
+        self,
+        name: &'static str,
+        variants: &'static [&'static str],
+        visitor: V,
+    ) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        match (
+            self.arguments,
+            self.properties.is_empty(),
+            self.children.is_none(),
+        ) {
+            ([it], true, true) => {
+                KdlAnnotatedLiteralDeser::new(it).deserialize_enum(name, variants, visitor)
+            }
+            _ => Err(DeError::invalid_type(
+                Unexpected::Other(
+                    "node that isn't exactly one argument deserializable as enum and nothing else",
+                ),
+                &visitor,
+            )),
+        }
     }
 
     fn deserialize_any<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -96,18 +143,23 @@ impl<'de> de::Deserializer<'de> for KdlNodeDeser<'de> {
             properties,
             children: self.children,
             value: MapDeserVal::None,
+            snekify: self.forwarding_to_map_from_struct,
         })
     }
     fn deserialize_struct<V>(
         self,
-        name: &'static str,
-        fields: &'static [&'static str],
+        _name: &'static str,
+        _fields: &'static [&'static str],
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
-        self.deserialize_map(visitor)
+        let self2 = Self {
+            forwarding_to_map_from_struct: true,
+            ..self
+        };
+        self2.deserialize_map(visitor)
     }
 
     fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value, Self::Error>
@@ -133,7 +185,7 @@ impl<'de> de::Deserializer<'de> for KdlNodeDeser<'de> {
             visitor.visit_seq(SeqArgsDeser(self.arguments))
         }
     }
-    fn deserialize_tuple<V>(self, len: usize, visitor: V) -> Result<V::Value, Self::Error>
+    fn deserialize_tuple<V>(self, _len: usize, visitor: V) -> Result<V::Value, Self::Error>
     where
         V: de::Visitor<'de>,
     {
@@ -141,8 +193,8 @@ impl<'de> de::Deserializer<'de> for KdlNodeDeser<'de> {
     }
     fn deserialize_tuple_struct<V>(
         self,
-        name: &'static str,
-        len: usize,
+        _name: &'static str,
+        _len: usize,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -166,7 +218,7 @@ impl<'de> de::Deserializer<'de> for KdlNodeDeser<'de> {
     }
     fn deserialize_unit_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -181,9 +233,15 @@ impl<'de> de::Deserializer<'de> for KdlNodeDeser<'de> {
         visitor.visit_unit()
     }
 
+    fn deserialize_option<V>(self, visitor: V) -> Result<V::Value, Self::Error>
+    where
+        V: de::Visitor<'de>,
+    {
+        visitor.visit_some(self)
+    }
     fn deserialize_newtype_struct<V>(
         self,
-        name: &'static str,
+        _name: &'static str,
         visitor: V,
     ) -> Result<V::Value, Self::Error>
     where
@@ -191,24 +249,13 @@ impl<'de> de::Deserializer<'de> for KdlNodeDeser<'de> {
     {
         visitor.visit_newtype_struct(self)
     }
-
-    fn deserialize_enum<V>(
-        self,
-        name: &'static str,
-        variants: &'static [&'static str],
-        visitor: V,
-    ) -> Result<V::Value, Self::Error>
-    where
-        V: de::Visitor<'de>,
-    {
-        Err(DeError::invalid_type(Unexpected::Other("a node"), &visitor))
-    }
 }
 
 struct MapDeser<'de> {
     /// These are in *backwards* order so it's cheap to pop the back one off
     properties: Vec<(&'de str, &'de KdlAnnotatedLiteral)>,
     children: Option<&'de [KdlNode]>,
+    snekify: bool,
 
     value: MapDeserVal<'de>,
 }
@@ -231,18 +278,23 @@ impl<'de> de::MapAccess<'de> for MapDeser<'de> {
         }
 
         // more like *pop*erties amirite
-        if let Some((key, val)) = self.properties.pop() {
+        let key = if let Some((key, val)) = self.properties.pop() {
             self.value = MapDeserVal::Property(val);
-            seed.deserialize(key.into_deserializer()).map(Some)
+            key
         } else if let Some([kid, tail @ ..]) = self.children {
             // lispily pop the front
             self.children = Some(tail);
             self.value = MapDeserVal::Child(kid);
-            seed.deserialize(kid.name.as_str().into_deserializer())
-                .map(Some)
+            kid.name.as_str()
         } else {
-            Ok(None)
-        }
+            return Ok(None);
+        };
+        let snek = if self.snekify {
+            ToSnekCase::to_snek_case(key)
+        } else {
+            key.to_owned()
+        };
+        seed.deserialize(snek.into_deserializer()).map(Some)
     }
 
     fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value, Self::Error>
