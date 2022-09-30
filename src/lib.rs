@@ -2,11 +2,12 @@ pub mod blueprint;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use blueprint::{BlueprintLibrary, BlueprintLookupError};
+use blueprint::{BlueprintLibrary, BlueprintLookupError, BlueprintParseError};
 
-use knurdy::{DeError, KdlNode};
+use kdl::KdlNode;
+use knurdy::DeError;
 use palkia::{prelude::*, TypeIdWrapper};
-use serde::de::{DeserializeOwned, IntoDeserializer};
+use serde::de::DeserializeOwned;
 use smol_str::SmolStr;
 use thiserror::Error;
 
@@ -44,8 +45,8 @@ impl EntityFabricator {
     /// Load the KDL string into the fabricator as a list of blueprints.
     ///
     /// The `filepath` argument is just for error reporting purposes; this doesn't load anything from disc.
-    pub fn load_str(&mut self, src: &str, filepath: &str) -> Result<(), knuffel::Error> {
-        self.blueprints.load_str(filepath, src)
+    pub fn load_str(&mut self, src: &str, filepath: &str) -> Result<(), BlueprintParseError> {
+        self.blueprints.load_str(src, filepath)
     }
 
     /// Instantiate an entity from a blueprint, adding all the components in that blueprint
@@ -67,12 +68,13 @@ impl EntityFabricator {
         };
 
         for comp in print.components {
-            let factory = match self.fabricators.get(&comp.name) {
+            let name = comp.name().value();
+            let factory = match self.fabricators.get(name) {
                 Some(v) => v,
-                None => return Err((InstantiationError::NoFactory(comp.name.clone()), builder)),
+                None => return Err((InstantiationError::NoBlueprint(name.into()), builder)),
             };
             if let Err(err) = (factory.func)(&mut builder, &comp) {
-                return Err((InstantiationError::DeError(comp.name, err), builder));
+                return Err((InstantiationError::DeError(name.into(), err), builder));
             }
         }
 
@@ -85,8 +87,8 @@ impl EntityFabricator {
 pub enum InstantiationError {
     #[error("while looking up the blueprint: {0}")]
     BlueprintLookupError(#[from] BlueprintLookupError),
-    #[error("there was no factory registered for a component named {0:?}")]
-    NoFactory(SmolStr),
+    #[error("there was no blueprint registered for a component named {0:?}")]
+    NoBlueprint(SmolStr),
     #[error("while deserializing the component {0:?} from kdl: {1}")]
     DeError(SmolStr, DeError),
 }
@@ -109,7 +111,7 @@ struct ComponentFactory {
 impl ComponentFactory {
     fn new<C: Component + DeserializeOwned>() -> Self {
         let clo = |builder: &mut dyn ObjSafeEntityBuilder, node: &KdlNode| -> Result<(), DeError> {
-            let component = C::deserialize(node.into_deserializer())?;
+            let component: C = knurdy::deserialize_node(node)?;
             builder.insert_raw(Box::new(component));
             Ok(())
         };

@@ -3,23 +3,27 @@ name = "dialga"
 version = "0.1.0"
 edition = "2021"
 
+license = "MIT"
+description = "Blueprint instantiator for Palkia"
+repository = "https://www.github.com/gamma-delta/dialga"
+keywords = ["gamedev"]
+categories = ["game-development"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-knurdy = { path = "knurdy" }
+knurdy = "0.1.0"
 
 ahash = "0.8.0"
-palkia = { version = "0.5.2", path = "../palkia", features = ["serde"] }
+palkia = { version = "0.6.0", features = ["serde"] }
 serde = { version = "1.0.144", features = ["derive"] }
 smol_str = "0.1.23"
-knuffel = "2.0.0"
 thiserror = "1.0.34"
+kdl = "4.5.0"
+miette = "5.3.0"
 
 [patch.crates-io]
 # auughh
-knuffel = { git = "https://github.com/spikespaz/knuffel" }
 
 [dev-dependencies]
-miette = { version = "4.3.0", features = ["fancy"] }
-
-[workspace]
+miette = { version = "5.3.0", features = ["fancy"] }
