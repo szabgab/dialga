@@ -1,3 +1,5 @@
+//! Internal workings of the library. You probably don't need to look here.
+
 use std::fmt::Display;
 
 use ahash::AHashMap;

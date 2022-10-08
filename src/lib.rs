@@ -11,6 +11,7 @@ use serde::de::DeserializeOwned;
 use smol_str::SmolStr;
 use thiserror::Error;
 
+/// The entrypoint to the library; a library of blueprints and the ability to instantiate entities from them.
 pub struct EntityFabricator {
     blueprints: BlueprintLibrary,
     /// Map component names to factories for it.
@@ -57,7 +58,7 @@ impl EntityFabricator {
     ///
     /// Returns ownership of the builder whether it succeeds or fails, in case you want to insert as many
     /// components as you can before it fails.
-    pub fn instantiate<B: EntityBuilder>(
+    pub fn instantiate_catching_builder<B: EntityBuilder>(
         &self,
         name: &str,
         mut builder: B,
@@ -79,6 +80,18 @@ impl EntityFabricator {
         }
 
         Ok(builder)
+    }
+
+    /// Instantiate an entity, but don't return the builder if something goes wrong.
+    ///
+    /// See [`EntityFabricator::instantiate_catching_builder`].
+    pub fn instantiate<B: EntityBuilder>(
+        &self,
+        name: &str,
+        builder: B,
+    ) -> Result<B, InstantiationError> {
+        self.instantiate_catching_builder(name, builder)
+            .map_err(|(err, _)| err)
     }
 }
 
@@ -105,7 +118,12 @@ impl<T: EntityBuilder> ObjSafeEntityBuilder for T {
 
 struct ComponentFactory {
     tid: TypeIdWrapper,
-    func: Box<dyn Fn(&mut dyn ObjSafeEntityBuilder, &KdlNode) -> Result<(), DeError>>,
+    func: Box<
+        dyn Fn(&mut dyn ObjSafeEntityBuilder, &KdlNode) -> Result<(), DeError>
+            + Send
+            + Sync
+            + 'static,
+    >,
 }
 
 impl ComponentFactory {

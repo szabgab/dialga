@@ -102,10 +102,7 @@ fn test() {
     fab.load_str(bp_src, "example.kdl")
         .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
 
-    let grass = fab
-        .instantiate("grass", world.spawn())
-        .unwrap_or_else(|(err, _)| panic!("{}", err))
-        .build();
+    let grass = fab.instantiate("grass", world.spawn()).unwrap().build();
     {
         let (pb, hp) = world.query::<(&PhysicBody, &HasHP)>(grass).unwrap();
         assert_eq!(*pb, PhysicBody { mass: 10 },);
@@ -118,10 +115,7 @@ fn test() {
         );
     }
 
-    let housecat = fab
-        .instantiate("housecat", world.spawn())
-        .unwrap_or_else(|(err, _)| panic!("{}", err))
-        .build();
+    let housecat = fab.instantiate("housecat", world.spawn()).unwrap().build();
     {
         let (name, pb, hp, fa) = world
             .query::<(&Named, &PhysicBody, &HasHP, &FactionAffiliations)>(housecat)
@@ -149,10 +143,7 @@ fn test() {
         );
     }
 
-    let puma = fab
-        .instantiate("puma", world.spawn())
-        .unwrap_or_else(|(err, _)| panic!("{}", err))
-        .build();
+    let puma = fab.instantiate("puma", world.spawn()).unwrap().build();
     {
         let (pb, hp, fa) = world
             .query::<(&PhysicBody, &HasHP, &FactionAffiliations)>(puma)
