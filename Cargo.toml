@@ -1,6 +1,6 @@
 [package]
 name = "dialga"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 license = "MIT"
@@ -15,7 +15,7 @@ categories = ["game-development"]
 knurdy = "0.1.0"
 
 ahash = "0.8.0"
-palkia = { version = "0.6.0", features = ["serde"] }
+palkia = "0.8.0"
 serde = { version = "1.0.144", features = ["derive"] }
 smol_str = "0.1.23"
 thiserror = "1.0.34"
