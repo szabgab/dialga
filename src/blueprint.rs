@@ -12,9 +12,8 @@ use thiserror::Error;
 /// Raw instructions for instantiating an entity, as loaded from disc.
 pub struct RawBlueprint {
     name: SmolStr,
-    inherit: Option<SmolStr>,
     merge: MergeMode,
-    components: Vec<KdlNode>,
+    components: Vec<ComponentEntry>,
 }
 
 impl RawBlueprint {
@@ -35,7 +34,6 @@ impl RawBlueprint {
                 }
             };
 
-            let mut inherit = None;
             let mut merge = None;
             for entry in kid.entries() {
                 let key = if let Some(key) = entry.name() {
@@ -49,25 +47,6 @@ impl RawBlueprint {
                 };
 
                 match key.value() {
-                    "inherit" => {
-                        if inherit.is_some() {
-                            return Err(RawBlueprintDeserError {
-                                span: *entry.span(),
-                                kind: RawBlueprintParseErrorKind::ClobberInherit,
-                                src,
-                            });
-                        }
-
-                        if let Some(string) = entry.value().as_string() {
-                            inherit = Some(string.into());
-                        } else {
-                            return Err(RawBlueprintDeserError {
-                                span: *entry.span(),
-                                kind: RawBlueprintParseErrorKind::NonStringInherit,
-                                src,
-                            });
-                        }
-                    }
                     "merge" => {
                         if merge.is_some() {
                             return Err(RawBlueprintDeserError {
@@ -117,13 +96,42 @@ impl RawBlueprint {
                     });
                 }
             }
-
             let merge = merge.unwrap_or_default();
-            let components = comps.nodes().iter().cloned().collect();
+
+            // We can't use .map here for borrowck reasons
+            let components = {
+                let mut components = Vec::new();
+                for node in comps.nodes() {
+                    let entry = match node.ty() {
+                        None => ComponentEntry::Component(node.clone()),
+                        Some(ann) => {
+                            if !node.entries().is_empty() || node.children().is_some() {
+                                return Err(RawBlueprintDeserError {
+                                    span: *node.span(),
+                                    kind: RawBlueprintParseErrorKind::BadAnnotation,
+                                    src,
+                                });
+                            } else {
+                                match ann.value() {
+                                    "splice" => ComponentEntry::Splice(node.name().value().into()),
+                                    _ => {
+                                        return Err(RawBlueprintDeserError {
+                                            span: *node.span(),
+                                            kind: RawBlueprintParseErrorKind::BadAnnotation,
+                                            src,
+                                        })
+                                    }
+                                }
+                            }
+                        }
+                    };
+                    components.push(entry);
+                }
+                components
+            };
 
             let bp = RawBlueprint {
                 name: kid.name().value().into(),
-                inherit,
                 merge,
                 components,
             };
@@ -132,6 +140,11 @@ impl RawBlueprint {
 
         Ok(out)
     }
+}
+
+enum ComponentEntry {
+    Component(KdlNode),
+    Splice(SmolStr),
 }
 /// Instructions for instantiating an entity, with all inheritors folded in.
 pub struct Blueprint {
@@ -163,12 +176,21 @@ impl BlueprintLibrary {
                 }
                 MergeMode::Merge => {
                     for comp in blueprint.components.into_iter() {
-                        if let Some(old_comp) = old
-                            .components
-                            .iter_mut()
-                            .find(|old_comp| old_comp.name() == comp.name())
-                        {
-                            *old_comp = comp;
+                        let clobberee = match &comp {
+                            ComponentEntry::Splice(_) => None,
+                            ComponentEntry::Component(new_node) => {
+                                // we must have no nodes with the same name
+                                old.components.iter_mut().find(|old_comp| {
+                                    if let ComponentEntry::Component(it) = old_comp {
+                                        it.name() == new_node.name()
+                                    } else {
+                                        false
+                                    }
+                                })
+                            }
+                        };
+                        if let Some(clobberee) = clobberee {
+                            *clobberee = comp;
                         } else {
                             old.components.push(comp);
                         }
@@ -194,52 +216,52 @@ impl BlueprintLibrary {
     pub fn lookup(&self, name: &str) -> Result<Blueprint, BlueprintLookupError> {
         fn recurse(
             lib: &BlueprintLibrary,
-            name: &str,
+            name: &SmolStr,
             path: Vec<SmolStr>,
-        ) -> Result<Blueprint, BlueprintLookupError> {
+        ) -> Result<Vec<KdlNode>, BlueprintLookupError> {
             let raw = lib.prints.get(name).ok_or_else(|| match path.as_slice() {
-                [] => BlueprintLookupError::NotFound(name.into()),
-                [.., last] => BlueprintLookupError::InheriteeNotFound(last.clone(), name.into()),
+                [] => BlueprintLookupError::BlueprintNotFound(name.clone()),
+                [.., last] => BlueprintLookupError::InheriteeNotFound(last.clone(), name.clone()),
             })?;
-            match &raw.inherit {
-                None => Ok(Blueprint {
-                    name: raw.name.clone(),
-                    components: raw.components.clone(),
-                }),
-                Some(parent_name) => {
-                    if let Some(ono) = path
-                        .iter()
-                        .enumerate()
-                        .find_map(|(idx, kid)| (kid == parent_name).then_some(idx))
-                    {
-                        let mut problem = path[ono..].to_vec();
-                        // Push this parent too to make it clear to the user
-                        problem.push(parent_name.clone());
-                        return Err(BlueprintLookupError::InheritanceLoop(problem));
+            let mut out = Vec::new();
+            for comp in raw.components.iter() {
+                match comp {
+                    ComponentEntry::Component(node) => {
+                        out.push(node.clone());
                     }
-
-                    let mut path2 = path.clone();
-                    path2.push(parent_name.clone());
-                    let mut parent = recurse(lib, parent_name, path2)?;
-
-                    for comp in raw.components.iter().cloned() {
-                        if let Some(clobberee) = parent
-                            .components
-                            .iter_mut()
-                            .find(|pcomp| pcomp.name() == comp.name())
+                    ComponentEntry::Splice(parent_name) => {
+                        // Check for loops
+                        if let Some(ono) = path
+                            .iter()
+                            .enumerate()
+                            .find_map(|(idx, kid)| (kid == parent_name).then_some(idx))
                         {
-                            *clobberee = comp;
-                        } else {
-                            parent.components.push(comp);
+                            let mut problem = path[ono..].to_vec();
+                            // Push the current one ...
+                            problem.push(name.clone());
+                            // and the start of the loop
+                            problem.push(path[ono].clone());
+                            return Err(BlueprintLookupError::InheritanceLoop(problem));
                         }
-                    }
 
-                    Ok(parent)
+                        let mut path2 = path.clone();
+                        path2.push(name.clone());
+                        let to_splice = recurse(lib, parent_name, path2)?;
+
+                        out.extend(to_splice);
+                    }
                 }
             }
+
+            Ok(out)
         }
 
-        recurse(self, name, Vec::new())
+        let smol_name = name.into();
+        let components = recurse(self, &smol_name, Vec::new())?;
+        Ok(Blueprint {
+            name: name.into(),
+            components,
+        })
     }
 }
 
@@ -261,10 +283,10 @@ pub enum MergeMode {
 }
 
 /// Problems when looking up a blueprint.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum BlueprintLookupError {
-    #[error("the blueprint {0} was not found")]
-    NotFound(SmolStr),
+    #[error("the entrypoint blueprint {0} was not found")]
+    BlueprintNotFound(SmolStr),
     #[error("when trying to inherit from another blueprint, the following loop was found: {0:?}")]
     InheritanceLoop(Vec<SmolStr>),
     #[error(
@@ -318,24 +340,26 @@ pub struct RawBlueprintDeserError {
     pub kind: RawBlueprintParseErrorKind,
 }
 
-const BP_REQS: &str = r#"only `merge="merge"` or `merge="clobber"`, and `inherit="some other blueprint"`, are allowed"#;
+const TOP_LEVEL_REQS: &str = r#"only `merge="merge"` or `merge="clobber"` are allowed"#;
+const ANN_REQS: &str =
+    r#"only `(splice)a-blueprint` with no further args/props/children is allowed"#;
 
 #[derive(Debug, Error)]
 pub enum RawBlueprintParseErrorKind {
     #[error("blueprint node had no children")]
     NoChildren,
-    #[error("blueprint node had an argument; {}", BP_REQS)]
+    #[error("blueprint node had an argument; {}", TOP_LEVEL_REQS)]
     TopLevelArgument,
-    #[error("blueprint node had an annotation; {}", BP_REQS)]
+    #[error("blueprint node had an annotation; {}", TOP_LEVEL_REQS)]
     TopLevelAnnotation,
-    #[error("blueprint node had an invalid key; {}", BP_REQS)]
+    #[error("blueprint node had an invalid key; {}", TOP_LEVEL_REQS)]
     InvalidKey,
-    #[error("the `inherit` key didn't have a string value")]
-    NonStringInherit,
     #[error(r#"the `merge` key didn't equal "clobber" or "merge""#)]
     BadMerge,
     #[error("redefined `inherit`")]
     ClobberInherit,
     #[error("redefined `merge`")]
     ClobberMerge,
+    #[error("bad annotation; {}", ANN_REQS)]
+    BadAnnotation,
 }

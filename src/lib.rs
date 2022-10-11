@@ -72,7 +72,7 @@ impl EntityFabricator {
             let name = comp.name().value();
             let factory = match self.fabricators.get(name) {
                 Some(v) => v,
-                None => return Err((InstantiationError::NoBlueprint(name.into()), builder)),
+                None => return Err((InstantiationError::NoComponent(name.into()), builder)),
             };
             if let Err(err) = (factory.func)(&mut builder, &comp) {
                 return Err((InstantiationError::DeError(name.into(), err), builder));
@@ -96,12 +96,12 @@ impl EntityFabricator {
 }
 
 /// Things that can go wrong when instantiating an entity.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum InstantiationError {
     #[error("while looking up the blueprint: {0}")]
     BlueprintLookupError(#[from] BlueprintLookupError),
-    #[error("there was no blueprint registered for a component named {0:?}")]
-    NoBlueprint(SmolStr),
+    #[error("there was no factory registered for a component named {0:?}")]
+    NoComponent(SmolStr),
     #[error("while deserializing the component {0:?} from kdl: {1}")]
     DeError(SmolStr, DeError),
 }

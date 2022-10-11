@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dialga::EntityFabricator;
+use dialga::{blueprint::BlueprintLookupError, EntityFabricator, InstantiationError};
 use palkia::prelude::*;
 use serde::Deserialize;
 
@@ -16,6 +16,10 @@ macro_rules! impl_component {
         }
     };
 }
+
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+struct TrackedPosition;
+impl_component!(TrackedPosition);
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct Positioned {
@@ -50,34 +54,58 @@ struct FactionAffiliations {
 }
 impl_component!(FactionAffiliations);
 
-fn setup_world() -> (World, EntityFabricator) {
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+struct Legendary;
+impl_component!(Legendary);
+
+fn setup_world() -> World {
     let mut world = World::new();
+    world.register_component::<TrackedPosition>();
     world.register_component::<Positioned>();
     world.register_component::<Named>();
     world.register_component::<PhysicBody>();
     world.register_component::<HasHP>();
     world.register_component::<FactionAffiliations>();
+    world.register_component::<Legendary>();
+    world
+}
 
+fn setup_fab() -> EntityFabricator {
     let mut fab = EntityFabricator::new();
+    fab.register::<TrackedPosition>("tracked-position");
     fab.register::<Named>("name");
     fab.register::<PhysicBody>("physic-body");
     fab.register::<HasHP>("has-hp");
     fab.register::<FactionAffiliations>("factions");
+    fab.register::<Legendary>("legendary");
+    fab
+}
 
-    (world, fab)
+fn setup_both() -> (World, EntityFabricator) {
+    (setup_world(), setup_fab())
 }
 
 #[test]
 fn test() {
-    let (mut world, mut fab) = setup_world();
+    let (mut world, mut fab) = setup_both();
 
     let bp_src = r#"
+    // Two example splicees -- in real life these will be more complicated
+    mob {
+        tracked-position
+    }
+
+    legend {
+        legendary
+    }
+
     grass {
         physic-body mass=10
         has-hp start-hp=10
     }
 
     cat {
+        (splice)mob
         physic-body mass=50
         has-hp { 
             start-hp 10
@@ -90,13 +118,15 @@ fn test() {
         }
     }
 
-    housecat inherit="cat" {
+    housecat {
+        (splice)cat
         name "Macy"
     }
 
-    puma inherit="cat" {
+    puma {
+        (splice)cat
         physic-body mass=150
-        // We'll ignore HP and stuff
+        (splice)legend
     }
     "#;
     fab.load_str(bp_src, "example.kdl")
@@ -117,8 +147,14 @@ fn test() {
 
     let housecat = fab.instantiate("housecat", world.spawn()).unwrap().build();
     {
-        let (name, pb, hp, fa) = world
-            .query::<(&Named, &PhysicBody, &HasHP, &FactionAffiliations)>(housecat)
+        let (name, pb, hp, fa, _tp) = world
+            .query::<(
+                &Named,
+                &PhysicBody,
+                &HasHP,
+                &FactionAffiliations,
+                &TrackedPosition,
+            )>(housecat)
             .unwrap();
 
         assert_eq!(*name, Named("Macy".to_owned()));
@@ -145,8 +181,14 @@ fn test() {
 
     let puma = fab.instantiate("puma", world.spawn()).unwrap().build();
     {
-        let (pb, hp, fa) = world
-            .query::<(&PhysicBody, &HasHP, &FactionAffiliations)>(puma)
+        let (pb, hp, fa, _tp, _leg) = world
+            .query::<(
+                &PhysicBody,
+                &HasHP,
+                &FactionAffiliations,
+                &TrackedPosition,
+                &Legendary,
+            )>(puma)
             .unwrap();
 
         assert_eq!(*pb, PhysicBody { mass: 150 });
@@ -168,4 +210,100 @@ fn test() {
             }
         );
     }
+}
+
+#[test]
+fn error_unknown() {
+    let mut world = setup_world();
+
+    let bp_src = r#"
+    oh-no {
+        tracked-position
+        erroring-comp
+    }
+    "#;
+    let mut fab = setup_fab();
+    fab.load_str(bp_src, "example.kdl")
+        .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
+
+    let err = match fab.instantiate("unknown", world.spawn()) {
+        Ok(_) => {
+            panic!("expected error")
+        }
+        Err(it) => it,
+    };
+    assert_eq!(
+        err,
+        InstantiationError::BlueprintLookupError(BlueprintLookupError::BlueprintNotFound(
+            "unknown".into()
+        ))
+    );
+
+    let err = match fab.instantiate("oh-no", world.spawn()) {
+        Ok(_) => {
+            panic!("expected error")
+        }
+        Err(it) => it,
+    };
+    assert_eq!(err, InstantiationError::NoComponent("erroring-comp".into()));
+
+    let bp_src = r#"
+    alpha {
+        physic-body mass=10
+        (splice)beta
+    }
+    beta {
+        has-hp start-hp=10
+        (splice)gamma
+    }
+    gamma {
+        legendary
+        (splice)delta
+    }
+    delta {
+        tracks-position
+        (splice)alpha
+    }
+    entrypoint {
+        (splice)alpha
+    }
+
+    failure {
+        (splice)unknown
+    }
+    "#;
+    let mut fab = setup_fab();
+    fab.load_str(bp_src, "example.kdl")
+        .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
+
+    let err = match fab.instantiate("failure", world.spawn()) {
+        Ok(_) => {
+            panic!("expected error")
+        }
+        Err(it) => it,
+    };
+    assert_eq!(
+        err,
+        InstantiationError::BlueprintLookupError(BlueprintLookupError::InheriteeNotFound(
+            "failure".into(),
+            "unknown".into()
+        ))
+    );
+
+    let err = match fab.instantiate("entrypoint", world.spawn()) {
+        Ok(_) => {
+            panic!("expected error")
+        }
+        Err(it) => it,
+    };
+    assert_eq!(
+        err,
+        InstantiationError::BlueprintLookupError(BlueprintLookupError::InheritanceLoop(vec![
+            "alpha".into(),
+            "beta".into(),
+            "gamma".into(),
+            "delta".into(),
+            "alpha".into(),
+        ]))
+    );
 }
