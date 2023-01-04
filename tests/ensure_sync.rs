@@ -6,5 +6,5 @@ struct MustSendSync<T: Send + Sync>(PhantomData<T>);
 
 #[test]
 fn must_compile() {
-    let _ = MustSendSync::<EntityFabricator>(PhantomData);
+    let _ = MustSendSync::<EntityFabricator<()>>(PhantomData);
 }

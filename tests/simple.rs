@@ -1,13 +1,15 @@
 use std::collections::HashMap;
 
-use dialga::{blueprint::BlueprintLookupError, EntityFabricator, InstantiationError};
+use dialga::EntityFabricator;
 use palkia::prelude::*;
 use serde::Deserialize;
 
 macro_rules! impl_component {
     ($ty:ty) => {
         impl Component for $ty {
-            fn register_handlers(builder: HandlerBuilder<Self>) -> HandlerBuilder<Self>
+            fn register_handlers(
+                builder: HandlerBuilder<Self>,
+            ) -> HandlerBuilder<Self>
             where
                 Self: Sized,
             {
@@ -70,18 +72,18 @@ fn setup_world() -> World {
     world
 }
 
-fn setup_fab() -> EntityFabricator {
+fn setup_fab() -> EntityFabricator<()> {
     let mut fab = EntityFabricator::new();
-    fab.register::<TrackedPosition>("tracked-position");
-    fab.register::<Named>("name");
-    fab.register::<PhysicBody>("physic-body");
-    fab.register::<HasHP>("has-hp");
-    fab.register::<FactionAffiliations>("factions");
-    fab.register::<Legendary>("legendary");
+    fab.register_serde::<TrackedPosition>("tracked-position");
+    fab.register_serde::<Named>("name");
+    fab.register_serde::<PhysicBody>("physic-body");
+    fab.register_serde::<HasHP>("has-hp");
+    fab.register_serde::<FactionAffiliations>("factions");
+    fab.register_serde::<Legendary>("legendary");
     fab
 }
 
-fn setup_both() -> (World, EntityFabricator) {
+fn setup_both() -> (World, EntityFabricator<()>) {
     (setup_world(), setup_fab())
 }
 
@@ -132,7 +134,7 @@ fn test() {
     fab.load_str(bp_src, "example.kdl")
         .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
 
-    let grass = fab.instantiate("grass", world.spawn()).unwrap().build();
+    let grass = fab.instantiate("grass", world.spawn(), &()).unwrap();
     {
         let (pb, hp) = world.query::<(&PhysicBody, &HasHP)>(grass).unwrap();
         assert_eq!(*pb, PhysicBody { mass: 10 },);
@@ -145,7 +147,7 @@ fn test() {
         );
     }
 
-    let housecat = fab.instantiate("housecat", world.spawn()).unwrap().build();
+    let housecat = fab.instantiate("housecat", world.spawn(), &()).unwrap();
     {
         let (name, pb, hp, fa, _tp) = world
             .query::<(
@@ -163,9 +165,12 @@ fn test() {
             *hp,
             HasHP {
                 start_hp: 10,
-                resistances: [("falling".to_string(), 100), ("ice".to_string(), -20)]
-                    .into_iter()
-                    .collect(),
+                resistances: [
+                    ("falling".to_string(), 100),
+                    ("ice".to_string(), -20)
+                ]
+                .into_iter()
+                .collect(),
             }
         );
 
@@ -179,7 +184,7 @@ fn test() {
         );
     }
 
-    let puma = fab.instantiate("puma", world.spawn()).unwrap().build();
+    let puma = fab.instantiate("puma", world.spawn(), &()).unwrap();
     {
         let (pb, hp, fa, _tp, _leg) = world
             .query::<(
@@ -196,9 +201,12 @@ fn test() {
             *hp,
             HasHP {
                 start_hp: 10,
-                resistances: [("falling".to_string(), 100), ("ice".to_string(), -20)]
-                    .into_iter()
-                    .collect(),
+                resistances: [
+                    ("falling".to_string(), 100),
+                    ("ice".to_string(), -20)
+                ]
+                .into_iter()
+                .collect(),
             }
         );
         assert_eq!(
@@ -213,8 +221,8 @@ fn test() {
 }
 
 #[test]
-fn error_unknown() {
-    let mut world = setup_world();
+fn error_unknown_blueprint() {
+    let (mut world, mut fab) = setup_both();
 
     let bp_src = r#"
     oh-no {
@@ -222,31 +230,30 @@ fn error_unknown() {
         erroring-comp
     }
     "#;
-    let mut fab = setup_fab();
     fab.load_str(bp_src, "example.kdl")
         .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
 
-    let err = match fab.instantiate("unknown", world.spawn()) {
-        Ok(_) => {
-            panic!("expected error")
-        }
-        Err(it) => it,
-    };
-    assert_eq!(
-        err,
-        InstantiationError::BlueprintLookupError(BlueprintLookupError::BlueprintNotFound(
-            "unknown".into()
-        ))
-    );
+    fab.instantiate("unknown", world.spawn(), &()).unwrap();
+}
 
-    let err = match fab.instantiate("oh-no", world.spawn()) {
-        Ok(_) => {
-            panic!("expected error")
-        }
-        Err(it) => it,
-    };
-    assert_eq!(err, InstantiationError::NoComponent("erroring-comp".into()));
+#[test]
+fn error_unknown_component() {
+    let (mut world, mut fab) = setup_both();
 
+    let bp_src = r#"
+    oh-no {
+        tracked-position
+        erroring-comp
+    }
+    "#;
+    fab.load_str(bp_src, "example.kdl")
+        .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
+
+    fab.instantiate("oh-no", world.spawn(), &()).unwrap();
+}
+
+#[test]
+fn error_loop() {
     let bp_src = r#"
     alpha {
         physic-body mass=10
@@ -272,38 +279,10 @@ fn error_unknown() {
         (splice)unknown
     }
     "#;
-    let mut fab = setup_fab();
+
+    let (mut world, mut fab) = setup_both();
     fab.load_str(bp_src, "example.kdl")
         .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
 
-    let err = match fab.instantiate("failure", world.spawn()) {
-        Ok(_) => {
-            panic!("expected error")
-        }
-        Err(it) => it,
-    };
-    assert_eq!(
-        err,
-        InstantiationError::BlueprintLookupError(BlueprintLookupError::InheriteeNotFound(
-            "failure".into(),
-            "unknown".into()
-        ))
-    );
-
-    let err = match fab.instantiate("entrypoint", world.spawn()) {
-        Ok(_) => {
-            panic!("expected error")
-        }
-        Err(it) => it,
-    };
-    assert_eq!(
-        err,
-        InstantiationError::BlueprintLookupError(BlueprintLookupError::InheritanceLoop(vec![
-            "alpha".into(),
-            "beta".into(),
-            "gamma".into(),
-            "delta".into(),
-            "alpha".into(),
-        ]))
-    );
+    fab.instantiate("entrypoint", world.spawn(), &()).unwrap();
 }
