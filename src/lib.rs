@@ -1,12 +1,12 @@
 #![doc = include_str!("../README.md")]
 
 pub mod blueprint;
-mod factory;
+pub mod factory;
 
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::collections::BTreeMap;
 
 use blueprint::{BlueprintLibrary, BlueprintLookupError, BlueprintParseError};
-use factory::{ComponentAssembler, SerdeComponentFactory};
+use factory::{ComponentFactory, SerdeComponentFactory};
 
 use palkia::prelude::*;
 use serde::de::DeserializeOwned;
@@ -14,12 +14,13 @@ use smol_str::SmolStr;
 use thiserror::Error;
 
 /// The entrypoint to the library; a library of blueprints and the ability to instantiate entities from them.
+///
+/// The `Ctx` generic probably shouldn't need to be `'static`, but I can't figure out how to
+/// do it otherwise.
 pub struct EntityFabricator<Ctx> {
     blueprints: BlueprintLibrary,
     /// Map component names to factories for it.
-    assemblers: BTreeMap<SmolStr, Box<dyn ComponentAssembler<Ctx>>>,
-
-    phantom: PhantomData<Ctx>,
+    assemblers: BTreeMap<SmolStr, Box<dyn ComponentFactory<Ctx>>>,
 }
 
 impl<Ctx> EntityFabricator<Ctx>
@@ -30,30 +31,29 @@ where
         Self {
             blueprints: BlueprintLibrary::new(),
             assemblers: BTreeMap::new(),
-            phantom: PhantomData,
         }
     }
 
     /// Register a component assembler.
-    pub fn register<CA: ComponentAssembler<Ctx>>(
+    pub fn register<CA: ComponentFactory<Ctx>>(
         &mut self,
         name: &str,
-        assembler: CA,
+        factory: CA,
     ) {
         if let Some(_) = self
             .assemblers
-            .insert(SmolStr::from(name), Box::new(assembler))
+            .insert(SmolStr::from(name), Box::new(factory))
         {
             panic!("already registered something under the name {:?}", name);
         }
     }
 
-    /// Convenience function to register an assembler that just loads the thing with serce.
+    /// Convenience function to register an assembler that just loads the thing with serde.
     pub fn register_serde<C: DeserializeOwned + Component>(
         &mut self,
         name: &str,
     ) {
-        self.register(name, SerdeComponentFactory::<C, Ctx>(PhantomData))
+        self.register(name, SerdeComponentFactory::<C, Ctx>::new())
     }
 
     /// Load the KDL string into the fabricator as a list of blueprints.

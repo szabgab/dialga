@@ -221,6 +221,9 @@ fn test() {
 }
 
 #[test]
+#[should_panic(
+    expected = r#"BlueprintLookupError(BlueprintNotFound("unknown"))"#
+)]
 fn error_unknown_blueprint() {
     let (mut world, mut fab) = setup_both();
 
@@ -237,6 +240,7 @@ fn error_unknown_blueprint() {
 }
 
 #[test]
+#[should_panic(expected = r#"NoAssembler("erroring-comp")"#)]
 fn error_unknown_component() {
     let (mut world, mut fab) = setup_both();
 
@@ -253,6 +257,7 @@ fn error_unknown_component() {
 }
 
 #[test]
+#[should_panic(expected = r#"BlueprintLookupError(InheritanceLoop(["#)]
 fn error_loop() {
     let bp_src = r#"
     alpha {
@@ -274,10 +279,6 @@ fn error_loop() {
     entrypoint {
         (splice)alpha
     }
-
-    failure {
-        (splice)unknown
-    }
     "#;
 
     let (mut world, mut fab) = setup_both();
@@ -285,4 +286,22 @@ fn error_loop() {
         .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
 
     fab.instantiate("entrypoint", world.spawn(), &()).unwrap();
+}
+
+#[test]
+#[should_panic(
+    expected = r#"BlueprintLookupError(InheriteeNotFound("foobar", "oh-no"))"#
+)]
+fn error_splice_fail() {
+    let bp_src = r#"
+    foobar {
+        (splice)oh-no
+    }
+    "#;
+
+    let (mut world, mut fab) = setup_both();
+    fab.load_str(bp_src, "example.kdl")
+        .unwrap_or_else(|e| panic!("{:?}", miette::Report::new(e)));
+
+    fab.instantiate("foobar", world.spawn(), &()).unwrap();
 }
