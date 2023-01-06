@@ -5,7 +5,7 @@ use palkia::prelude::*;
 use serde::Deserialize;
 
 macro_rules! impl_component {
-    ($ty:ty) => {
+    (@ $ty:ty) => {
         impl Component for $ty {
             fn register_handlers(
                 builder: HandlerBuilder<Self>,
@@ -17,28 +17,29 @@ macro_rules! impl_component {
             }
         }
     };
+    ($($ty:ty),* $(,)?) => {
+        $(
+            impl_component!{@ $ty}
+        )*
+    };
 }
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct TrackedPosition;
-impl_component!(TrackedPosition);
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct Positioned {
     x: i32,
     y: i32,
 }
-impl_component!(Positioned);
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct Named(String);
-impl_component!(Named);
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct PhysicBody {
     mass: u32,
 }
-impl_component!(PhysicBody);
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct HasHP {
@@ -46,7 +47,6 @@ struct HasHP {
     #[serde(default)]
     resistances: HashMap<String, i32>,
 }
-impl_component!(HasHP);
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct FactionAffiliations {
@@ -54,11 +54,19 @@ struct FactionAffiliations {
     liked_by: Vec<String>,
     disliked_by: Vec<String>,
 }
-impl_component!(FactionAffiliations);
 
 #[derive(Debug, PartialEq, Eq, Deserialize)]
 struct Legendary;
-impl_component!(Legendary);
+
+impl_component!(
+    TrackedPosition,
+    Positioned,
+    Named,
+    PhysicBody,
+    HasHP,
+    FactionAffiliations,
+    Legendary
+);
 
 fn setup_world() -> World {
     let mut world = World::new();
