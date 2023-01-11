@@ -1,5 +1,5 @@
 use dialga::{factory::ComponentFactory, EntityFabricator};
-use palkia::{builder::EntityBuilderAccess, prelude::*};
+use palkia::prelude::*;
 
 use eyre::bail;
 use rand::{rngs::StdRng, SeedableRng};
@@ -61,16 +61,12 @@ impl ComponentFactory<Context> for InventoryFactory {
 
         let raw: Raw = knurdy::deserialize_node(node)?;
 
-        // TODO: gotta make the world accessible from the builder
         let items = match raw {
             Raw::Literal { items } => items
                 .iter()
                 .map(|bp_name| {
                     // god
-                    let builder2 = match builder.get_access_mut() {
-                        EntityBuilderAccess::Immediate(world) => world.spawn(),
-                        EntityBuilderAccess::Lazy(lazy) => lazy.lazy_spawn(),
-                    };
+                    let builder2 = builder.spawn_again();
                     ctx.fabber.instantiate(bp_name, builder2, ctx)
                 })
                 .collect::<Result<Vec<_>, _>>()?,
@@ -81,10 +77,7 @@ impl ComponentFactory<Context> for InventoryFactory {
                         None => bail!("no loot table named {:?}", &table_name),
                     };
 
-                let builder2 = match builder.get_access_mut() {
-                    EntityBuilderAccess::Immediate(world) => world.spawn(),
-                    EntityBuilderAccess::Lazy(lazy) => lazy.lazy_spawn(),
-                };
+                let builder2 = builder.spawn_again();
                 let bp_name = {
                     let mut rng = ctx.rng.lock().unwrap();
                     table_picker.get(&mut *rng)
