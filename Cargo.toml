@@ -1,6 +1,6 @@
 [package]
 name = "dialga"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 
 license = "MIT"
@@ -13,7 +13,7 @@ categories = ["game-development"]
 
 [dependencies]
 knurdy = "0.1.2"
-palkia = "0.9.4"
+palkia = "0.10.0"
 
 ahash = "0.8.0"
 serde = { version = "1.0.144", features = ["derive"] }
