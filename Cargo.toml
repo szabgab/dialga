@@ -5,7 +5,7 @@ edition = "2021"
 
 license = "MIT"
 description = "Blueprint instantiator for Palkia"
-repository = "https://www.github.com/gamma-delta/dialga"
+repository = "https://github.com/gamma-delta/dialga"
 keywords = ["gamedev"]
 categories = ["game-development"]
 
